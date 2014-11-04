@@ -1,0 +1,17 @@
+=pod
+
+=head1 NAME
+
+fs2koha.pl
+
+=head1 DESCRIPTION
+
+Script for syncing data from FS to Koha. 
+
+=head1 DOCUMENTATOIN
+
+Run this to read more documentation:
+
+  perldoc fs2koha.pl
+
+=cut
