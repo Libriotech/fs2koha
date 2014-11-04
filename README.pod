@@ -8,7 +8,7 @@ fs2koha.pl
 
 Script for syncing data from FS to Koha. 
 
-=head1 DOCUMENTATOIN
+=head1 DOCUMENTATION
 
 Run this to read more documentation:
 
