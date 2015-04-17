@@ -10,7 +10,7 @@ fs2koha.pl - Parse data from FS and insert them into Koha
  
 perl fs2koha.pl -i bas.xml -v
 
-sudo koha-shell -c "perl fs2koha.pl -i bas.xml -v -c STUDENT -b MYLIB" kohadev
+sudo koha-shell -c "perl fs2koha.pl -i bas.xml -v -s STUDENT -f FACULTY -b MYLIB" kohadev
 
 =head1 PREREQUISITES
 
@@ -34,7 +34,7 @@ my $dt = DateTime->now;
 my $date = $dt->ymd;
  
 # Get options
-my ( $input_file, $categorycode, $branchcode, $limit, $verbose, $debug ) = get_options();
+my ( $input_file, $students, $faculty, $branchcode, $limit, $verbose, $debug ) = get_options();
  
 # Check that the file exists
 if ( !-e $input_file ) {
@@ -47,65 +47,191 @@ my $xml = XMLin( $input_file );
 
 # Setup some counters
 my $faculty_count   = 0;
+my $faculty_new     = 0;
+my $faculty_updated = 0;
+my $faculty_failed  = 0;
 my $student_count   = 0;
 my $student_new     = 0;
 my $student_updated = 0;
 my $student_failed  = 0;
 
-# Skip faculty for now
-# foreach my $person ( @{ $xml->{'fagperson'} } ) {
-#     say 'F ' . $person->{'fornavn'} . ' ' . $person->{'etternavn'};
-#     $faculty_count++;
-# }
+if ( $faculty ne '' ) {
+    foreach my $person ( @{ $xml->{'fagperson'} } ) {
+        print 'F ' . $person->{'fornavn'} . ' ' . $person->{'etternavn'} if $verbose;
+        $person = fix_email( $person );
+        $person = fix_phone( $person );
+        if ( my $member = GetMember( 'cardnumber' => $person->{'fsLopenr'} ) ) {
+            my $borrowernumber = $member->{'borrowernumber'};
+            my $success = ModMember( 
+                'borrowernumber' => $borrowernumber,
+                'cardnumber'   => $person->{'fsLopenr'},
+                'categorycode' => $faculty,
+                'branchcode'   => $branchcode,
+                'firstname'    => $person->{'fornavn'}, 
+                'surname'      => $person->{'etternavn'},
+                'email'        => $person->{'epost_intern'},
+                'phone'        => $person->{'mobil'},
+                'userid'       => $person->{'brukernavn'},
+            );
+            if ( $success ) {
+                say " - Updated ($borrowernumber)" if $verbose;
+                $faculty_updated++;
+            } else {
+                say " - FAILED to update ($borrowernumber)" if $verbose;
+                $faculty_failed++;
+            }
+        } else {
+            # Add the borrower
+            my $borrowernumber = AddMember(
+                'cardnumber'   => $person->{'fsLopenr'},
+                'categorycode' => $faculty,
+                'branchcode'   => $branchcode,
+                'firstname'    => $person->{'fornavn'}, 
+                'surname'      => $person->{'etternavn'},
+                'email'        => $person->{'epost_intern'},
+                'emailpro'     => $person->{'epost_ekstern'},
+                'phone'        => $person->{'mobil'},
+                'userid'       => $person->{'brukernavn'},
+            );
+            # Set default messaging preferences
+            C4::Members::Messaging::SetMessagingPreferencesFromDefaults({
+                'borrowernumber' => $borrowernumber,
+                'categorycode'   => $faculty,
+            });
+            say " - Inserted as new ($borrowernumber)" if $verbose;
+            $faculty_new++;
+        }
+        $faculty_count++;
+        if ( $limit > 0 && $faculty_count == $limit ) {
+            last;
+        }
+    }
+}
 
-# Iterate over students
-foreach my $person ( @{ $xml->{'student'} } ) {
-    print 'S ' . $person->{'fornavn'} . ' ' . $person->{'etternavn'} . ' ' . $person->{'studentnr'} if $verbose;
-    # This just gets in the way of debugging
-    $person->{'studieTilknytninger'} = undef;
-    # Email
-    if ( $person->{'epost'} ) {
-        # Make sure $person->{'emails'} is an arrayref
-        if ( ref $person->{'epost'} eq 'HASH' ) {
-            push @{ $person->{'emails'} }, $person->{'epost'};
-        } else {
-            push @{ $person->{'emails'} }, @{ $person->{'epost'} };
+if ( $students ne '' ) {
+    foreach my $person ( @{ $xml->{'student'} } ) {
+        print 'S ' . $person->{'fornavn'} . ' ' . $person->{'etternavn'} . ' ' . $person->{'studentnr'} if $verbose;
+        # This just gets in the way of debugging
+        $person->{'studieTilknytninger'} = undef;
+        $person = fix_email( $person );
+        # Address
+        if ( $person->{'adresse'} ) {
+            # Make sure $person->{'adresser'} is an arrayref
+            if ( ref $person->{'adresse'} eq 'HASH' ) {
+                push @{ $person->{'adresser'} }, $person->{'adresse'};
+            } else {
+                push @{ $person->{'adresser'} }, @{ $person->{'adresse'} };
+            }
+            # Pick out the different addresses
+            foreach my $adr ( @{ $person->{'adresser'} } ) {
+                # The zip code is repeated here, so we need to remove the first 5 
+                # chars and store the rest
+                if ( $adr->{'sted'} ) {
+                    $adr->{'poststed'} = substr $adr->{'sted'}, 5;
+                }
+                # Now put the right address in the right slot
+                if ( $adr->{'type'} && $adr->{'type'} eq 'semester' ) {
+                    $person->{'adresse_semester'} = $adr;
+                }
+                if ( $adr->{'type'} && $adr->{'type'} eq 'hjem' ) {
+                    $person->{'adresse_hjem'} = $adr;
+                }
+            }
         }
-        # Pick out the different email types
-        foreach my $email ( @{ $person->{'emails'} } ) {
-            if ( $email->{'type'} eq 'ekstern' ) {
-                $person->{'epost_ekstern'} = $email->{'content'}
+        $person = fix_phone( $person );
+        # Calculate expiration date
+        my $year = substr $person->{'studierettSlutt'}, 0, 4;
+        if ( $year eq '9999' ) {
+            $person->{'expires'} = $person->{'studierettSlutt'};
+        } else {
+            my $expires = Time::Piece->strptime( $person->{'studierettSlutt'}, "%Y-%m-%d" );
+            $expires = $expires->add_years( 5 );
+            $person->{'expires'} = $expires->ymd;
+        }
+        # Dump all of $person if we are debugging
+        say Dumper $person if $debug;
+        # Figure out if the borrower already exists
+        if ( my $member = GetMember( 'cardnumber' => $person->{'studentnr'} ) ) {
+            my $borrowernumber = $member->{'borrowernumber'};
+            my $success = ModMember( 
+                'borrowernumber' => $borrowernumber,
+                'cardnumber'   => $person->{'studentnr'},
+                'categorycode' => $students,
+                'branchcode'   => $branchcode,
+                'firstname'    => $person->{'fornavn'}, 
+                'surname'      => $person->{'etternavn'},
+                'email'        => $person->{'epost_intern'},
+                'emailpro'     => $person->{'epost_ekstern'},
+                'phone'        => $person->{'mobil'},
+                'userid'       => $person->{'brukernavn'},
+                'dateexpiry'   => $person->{'expires'},
+                # Main address
+                'address'      => $person->{'adresse_semester'}->{'gate'}     || '',
+                'address2'     => $person->{'adresse_semester'}->{'co'}       || '',
+                'zipcode'      => $person->{'adresse_semester'}->{'postnr'}   || '',
+                'city'         => $person->{'adresse_semester'}->{'poststed'} || '',
+                # Secondary address
+                'B_address'      => $person->{'adresse_hjem'}->{'gate'}     || '',
+                'B_address2'     => $person->{'adresse_hjem'}->{'co'}       || '',
+                'B_zipcode'      => $person->{'adresse_hjem'}->{'postnr'}   || '',
+                'B_city'         => $person->{'adresse_hjem'}->{'poststed'} || '',
+            );
+            if ( $success ) {
+                say " - Updated ($borrowernumber)" if $verbose;
+                $student_updated++;
+            } else {
+                say " - FAILED to update ($borrowernumber)" if $verbose;
+                $student_failed++;
             }
-            if ( $email->{'type'} eq 'intern' ) {
-                $person->{'epost_intern'} = $email->{'content'}
-            }
+        } else {
+            # Add the borrower
+            my $borrowernumber = AddMember(
+                'cardnumber'   => $person->{'studentnr'},
+                'categorycode' => $students,
+                'branchcode'   => $branchcode,
+                'firstname'    => $person->{'fornavn'}, 
+                'surname'      => $person->{'etternavn'},
+                'email'        => $person->{'epost_intern'},
+                'emailpro'     => $person->{'epost_ekstern'},
+                'phone'        => $person->{'mobil'},
+                'userid'       => $person->{'brukernavn'},
+                'dateexpiry'   => $person->{'expires'},
+                # Main address
+                'address'      => $person->{'adresse_semester'}->{'gate'}     || '',
+                'address2'     => $person->{'adresse_semester'}->{'co'}       || '',
+                'zipcode'      => $person->{'adresse_semester'}->{'postnr'}   || '',
+                'city'         => $person->{'adresse_semester'}->{'poststed'} || '',
+                # Secondary address
+                'B_address'      => $person->{'adresse_hjem'}->{'gate'}     || '',
+                'B_address2'     => $person->{'adresse_hjem'}->{'co'}       || '',
+                'B_zipcode'      => $person->{'adresse_hjem'}->{'postnr'}   || '',
+                'B_city'         => $person->{'adresse_hjem'}->{'poststed'} || '',
+            );
+            # Set default messaging preferences
+            C4::Members::Messaging::SetMessagingPreferencesFromDefaults({
+                'borrowernumber' => $borrowernumber,
+                'categorycode'   => $students,
+            });
+            say " - Inserted as new ($borrowernumber)" if $verbose;
+            $student_new++;
+        }
+        $student_count++;
+        if ( $limit > 0 && $student_count == $limit ) {
+            last;
         }
     }
-    # Address
-    if ( $person->{'adresse'} ) {
-        # Make sure $person->{'adresser'} is an arrayref
-        if ( ref $person->{'adresse'} eq 'HASH' ) {
-            push @{ $person->{'adresser'} }, $person->{'adresse'};
-        } else {
-            push @{ $person->{'adresser'} }, @{ $person->{'adresse'} };
-        }
-        # Pick out the different addresses
-        foreach my $adr ( @{ $person->{'adresser'} } ) {
-            # The zip code is repeated here, so we need to remove the first 5 
-            # chars and store the rest
-            if ( $adr->{'sted'} ) {
-                $adr->{'poststed'} = substr $adr->{'sted'}, 5;
-            }
-            # Now put the right address in the right slot
-            if ( $adr->{'type'} && $adr->{'type'} eq 'semester' ) {
-                $person->{'adresse_semester'} = $adr;
-            }
-            if ( $adr->{'type'} && $adr->{'type'} eq 'hjem' ) {
-                $person->{'adresse_hjem'} = $adr;
-            }
-        }
-    }
-    # Phone
+}
+
+# Summarize
+if ( $verbose ) {
+    say "\nFaculty:  $faculty_count ($faculty_new new, $faculty_updated updated, $faculty_failed failed)";
+    say "Students: $student_count ($student_new new, $student_updated updated, $student_failed failed)";
+}
+
+sub fix_phone {
+
+    my ( $person ) = @_;
+
     if ( $person->{'telefon'} ) {
         # Make sure $person->{'telefoner'} is an arrayref
         if ( ref $person->{'telefon'} eq 'HASH' ) {
@@ -120,92 +246,35 @@ foreach my $person ( @{ $xml->{'student'} } ) {
             }
         }
     }
-    # Calculate expiration date
-    my $year = substr $person->{'studierettSlutt'}, 0, 4;
-    if ( $year eq '9999' ) {
-        $person->{'expires'} = $person->{'studierettSlutt'};
-    } else {
-        my $expires = Time::Piece->strptime( $person->{'studierettSlutt'}, "%Y-%m-%d" );
-        $expires = $expires->add_years( 5 );
-        $person->{'expires'} = $expires->ymd;
-    }
-    # Dump all of $person if we are debugging
-    say Dumper $person if $debug;
-    # Figure out if the borrower already exists
-    if ( my $member = GetMember( 'cardnumber' => $person->{'studentnr'} ) ) {
-        my $borrowernumber = $member->{'borrowernumber'};
-        my $success = ModMember( 
-            'borrowernumber' => $borrowernumber,
-            'cardnumber'   => $person->{'studentnr'},
-            'categorycode' => $categorycode,
-            'branchcode'   => $branchcode,
-            'firstname'    => $person->{'fornavn'}, 
-            'surname'      => $person->{'etternavn'},
-            'email'        => $person->{'epost_intern'},
-            'emailpro'     => $person->{'epost_ekstern'},
-            'phone'        => $person->{'mobil'},
-            'userid'       => $person->{'brukernavn'},
-            'dateexpiry'   => $person->{'expires'},
-            # Main address
-            'address'      => $person->{'adresse_semester'}->{'gate'}     || '',
-            'address2'     => $person->{'adresse_semester'}->{'co'}       || '',
-            'zipcode'      => $person->{'adresse_semester'}->{'postnr'}   || '',
-            'city'         => $person->{'adresse_semester'}->{'poststed'} || '',
-            # Secondary address
-            'B_address'      => $person->{'adresse_hjem'}->{'gate'}     || '',
-            'B_address2'     => $person->{'adresse_hjem'}->{'co'}       || '',
-            'B_zipcode'      => $person->{'adresse_hjem'}->{'postnr'}   || '',
-            'B_city'         => $person->{'adresse_hjem'}->{'poststed'} || '',
-        );
-        if ( $success ) {
-            say " - Updated ($borrowernumber)" if $verbose;
-            $student_updated++;
-        } else {
-            say " - FAILED to update ($borrowernumber)" if $verbose;
-            $student_failed++;
-        }
-    } else {
-        # Add the borrower
-        my $borrowernumber = AddMember(
-            'cardnumber'   => $person->{'studentnr'},
-            'categorycode' => $categorycode,
-            'branchcode'   => $branchcode,
-            'firstname'    => $person->{'fornavn'}, 
-            'surname'      => $person->{'etternavn'},
-            'email'        => $person->{'epost_intern'},
-            'emailpro'     => $person->{'epost_ekstern'},
-            'phone'        => $person->{'mobil'},
-            'userid'       => $person->{'brukernavn'},
-            'dateexpiry'   => $person->{'expires'},
-            # Main address
-            'address'      => $person->{'adresse_semester'}->{'gate'}     || '',
-            'address2'     => $person->{'adresse_semester'}->{'co'}       || '',
-            'zipcode'      => $person->{'adresse_semester'}->{'postnr'}   || '',
-            'city'         => $person->{'adresse_semester'}->{'poststed'} || '',
-            # Secondary address
-            'B_address'      => $person->{'adresse_hjem'}->{'gate'}     || '',
-            'B_address2'     => $person->{'adresse_hjem'}->{'co'}       || '',
-            'B_zipcode'      => $person->{'adresse_hjem'}->{'postnr'}   || '',
-            'B_city'         => $person->{'adresse_hjem'}->{'poststed'} || '',
-        );
-        # Set default messaging preferences
-        C4::Members::Messaging::SetMessagingPreferencesFromDefaults({
-            'borrowernumber' => $borrowernumber,
-            'categorycode'   => $categorycode,
-        });
-        say " - Inserted as new ($borrowernumber)" if $verbose;
-        $student_new++;
-    }
-    $student_count++;
-    if ( $limit > 0 && $student_count == $limit ) {
-        last;
-    }
+
+    return $person;
+
 }
 
-# Summarize
-if ( $verbose ) {
-    say "\nFaculty:  $faculty_count";
-    say "Students: $student_count ($student_new new, $student_updated updated, $student_failed failed)";
+sub fix_email {
+
+    my ( $person ) = @_;
+
+    if ( $person->{'epost'} ) {
+        # Make sure $person->{'emails'} is an arrayref
+        if ( ref $person->{'epost'} eq 'HASH' ) {
+            push @{ $person->{'emails'} }, $person->{'epost'};
+        } else {
+            push @{ $person->{'emails'} }, @{ $person->{'epost'} };
+        }
+        # Pick out the different email types
+        foreach my $email ( @{ $person->{'emails'} } ) {
+            if ( $email->{'type'} eq 'ekstern' ) {
+                $person->{'epost_ekstern'} = $email->{'content'}
+            }
+            if ( $email->{'type'} eq 'intern' || $email->{'type'} eq 'arbeid' ) {
+                $person->{'epost_intern'} = $email->{'content'}
+            }
+        }
+    }
+    
+    return $person;
+
 }
  
 =head1 OPTIONS
@@ -216,9 +285,15 @@ if ( $verbose ) {
  
 Name of input file.
 
-=item B<-c, --categorycode>
+=item B<-s, --students>
  
-Which categorycode to put people in. Must exist in the Koha you are running against. 
+Which categorycode to put students in. Must exist in the Koha you are running 
+against. If this option is not given, students will not be processed. 
+
+=item B<-f, --faculty>
+ 
+Which categorycode to put faculty in. Must exist in the Koha you are running 
+against. If this option is not given, faculty will not be processed. 
 
 =item B<-b, --branchcode>
  
@@ -247,30 +322,32 @@ Prints this help message and exits.
 sub get_options {
  
 # Options
-my $input_file   = '';
-my $categorycode = '';
-my $branchcode   = '';
-my $limit        = 0;
-my $verbose      = '';
-my $debug        = '';
-my $help         = '';
+my $input_file = '';
+my $students   = '';
+my $faculty    = '';
+my $branchcode = '';
+my $limit      = 0;
+my $verbose    = '';
+my $debug      = '';
+my $help       = '';
  
 GetOptions (
-    'i|infile=s'       => \$input_file,
-    'c|categorycode=s' => \$categorycode,
-    'b|branchcode=s'   => \$branchcode,
-    'l|limit=i'        => \$limit,
-    'v|verbose'        => \$verbose,
-    'd|debug'          => \$debug,
-    'h|?|help'         => \$help
+    'i|infile=s'     => \$input_file,
+    's|students=s'   => \$students,
+    'f|faculty=s'   => \$faculty,
+    'b|branchcode=s' => \$branchcode,
+    'l|limit=i'      => \$limit,
+    'v|verbose'      => \$verbose,
+    'd|debug'        => \$debug,
+    'h|?|help'       => \$help
 );
  
 pod2usage( -exitval => 0 ) if $help;
-pod2usage( -msg => "\nMissing Argument: -i, --infile required\n",       -exitval => 1 ) if !$input_file;
-pod2usage( -msg => "\nMissing Argument: -c, --categorycode required\n", -exitval => 1 ) if !$categorycode;
-pod2usage( -msg => "\nMissing Argument: -b, --branchcode required\n",   -exitval => 1 ) if !$branchcode;
+pod2usage( -msg => "\nMissing Argument: -i, --infile required\n",                    -exitval => 1 ) if !$input_file;
+pod2usage( -msg => "\nMissing Argument: -s, --students AND/OR -f, --faculty required\n", -exitval => 1 ) if !$students && !$faculty;
+pod2usage( -msg => "\nMissing Argument: -b, --branchcode required\n",                -exitval => 1 ) if !$branchcode;
  
-return ( $input_file, $categorycode, $branchcode, $limit, $verbose, $debug );
+return ( $input_file, $students, $faculty, $branchcode, $limit, $verbose, $debug );
  
 }
  
