@@ -19,6 +19,7 @@ sudo koha-shell -c "perl fs2koha.pl -i bas.xml -v -s STUDENT -f FACULTY -b MYLIB
 =cut
 
 use Koha::Database;
+use Koha::AuthUtils;
 use C4::Members qw( GetMember AddMember ModMember );
 use C4::Members::Messaging;
 use XML::LibXML::Simple qw(XMLin);
@@ -64,7 +65,7 @@ if ( $faculty ne '' ) {
         my $member = GetMember( 'cardnumber' => $person->{'fsLopenr'} );
         unless ( $member ) {
             # If cardnumber failed, try userid
-            $member = GetMember( 'userid' => $person->{'brukernavn'} )
+            $member = GetMember( 'userid' => $person->{'brukernavn'} );
         }
         if ( $member ) {
             # Update the borrower
@@ -108,6 +109,7 @@ if ( $faculty ne '' ) {
             say " - Inserted as new ($borrowernumber)" if $verbose;
             $faculty_new++;
         }
+        set_password_and_notify( $borrowernumber, $person->{'epost_intern'} );
         $faculty_count++;
         if ( $limit > 0 && $faculty_count == $limit ) {
             last;
@@ -222,6 +224,7 @@ if ( $students ne '' ) {
             say " - Inserted as new ($borrowernumber)" if $verbose;
             $student_new++;
         }
+        set_password_and_notify( $borrowernumber, $person->{'epost_intern'} );
         $student_count++;
         if ( $limit > 0 && $student_count == $limit ) {
             last;
@@ -233,6 +236,25 @@ if ( $students ne '' ) {
 if ( $verbose ) {
     say "\nFaculty:  $faculty_count ($faculty_new new, $faculty_updated updated, $faculty_failed failed)";
     say "Students: $student_count ($student_new new, $student_updated updated, $student_failed failed)";
+}
+
+sub set_password_and_notify {
+
+    my ( $borrowernumber, $email ) = @_;
+    my $member = GetMember( 'borrowernumber' => $borrowernumber );
+    # Check password is not set
+    if ( $member->{'password'} eq '!' ) {
+        say "setting password";
+        # Generate password
+
+        # Set password
+
+        # Send email
+    } else {
+        say "password already set";
+    }
+    # my $digest=Koha::AuthUtils::hash_password($input->param('newpassword'));
+
 }
 
 sub fix_phone {
