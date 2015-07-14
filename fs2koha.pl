@@ -158,11 +158,7 @@ if ( $students ne '' ) {
         # Dump all of $person if we are debugging
         say Dumper $person if $debug;
         # Figure out if the borrower already exists
-        my $member = GetMember( 'cardnumber' => $person->{'studentnr'} );
-        unless ( $member ) {
-            $member = GetMember( 'userid' => $person->{'brukernavn'} )
-        }
-        if ( $member ) {
+        if ( my $member = GetMember( 'cardnumber' => $person->{'studentnr'} ) ) {
             my $borrowernumber = $member->{'borrowernumber'};
             my $success = ModMember( 
                 'borrowernumber' => $borrowernumber,
