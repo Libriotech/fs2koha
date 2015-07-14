@@ -60,8 +60,10 @@ if ( $faculty ne '' ) {
         print 'F ' . $person->{'fornavn'} . ' ' . $person->{'etternavn'} if $verbose;
         $person = fix_email( $person );
         $person = fix_phone( $person );
+        # Try to find patron based on cardnumber
         my $member = GetMember( 'cardnumber' => $person->{'fsLopenr'} );
         unless ( $member ) {
+            # If cardnumber failed, try userid
             $member = GetMember( 'userid' => $person->{'brukernavn'} )
         }
         if ( $member ) {
@@ -76,7 +78,7 @@ if ( $faculty ne '' ) {
                 'surname'      => $person->{'etternavn'},
                 'email'        => $person->{'epost_intern'},
                 'phone'        => $person->{'mobil'},
-                'userid'       => $person->{'brukernavn'},
+                'userid'       => $member->{'userid'} ? $member->{'userid'} : $person->{'brukernavn'},
             );
             if ( $success ) {
                 say " - Updated ($borrowernumber)" if $verbose;
