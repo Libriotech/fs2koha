@@ -60,8 +60,12 @@ if ( $faculty ne '' ) {
         print 'F ' . $person->{'fornavn'} . ' ' . $person->{'etternavn'} if $verbose;
         $person = fix_email( $person );
         $person = fix_phone( $person );
-        my $member;
-        if ( $member = GetMember( 'cardnumber' => $person->{'fsLopenr'} ) || $member = GetMember( 'userid' => $person->{'brukernavn'} ) ) {
+        my $member = GetMember( 'cardnumber' => $person->{'fsLopenr'} );
+        unless ( $member ) {
+            $member = GetMember( 'userid' => $person->{'brukernavn'} )
+        }
+        if ( $member ) {
+            # Update the borrower
             my $borrowernumber = $member->{'borrowernumber'};
             my $success = ModMember( 
                 'borrowernumber' => $borrowernumber,
@@ -152,8 +156,11 @@ if ( $students ne '' ) {
         # Dump all of $person if we are debugging
         say Dumper $person if $debug;
         # Figure out if the borrower already exists
-        my $member;
-        if ( $member = GetMember( 'cardnumber' => $person->{'studentnr'} ) || $member = GetMember( 'userid' => $person->{'brukernavn'} ) ) {
+        my $member = GetMember( 'cardnumber' => $person->{'studentnr'} );
+        unless ( $member ) {
+            $member = GetMember( 'userid' => $person->{'brukernavn'} )
+        }
+        if ( $member ) {
             my $borrowernumber = $member->{'borrowernumber'};
             my $success = ModMember( 
                 'borrowernumber' => $borrowernumber,
