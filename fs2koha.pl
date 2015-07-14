@@ -67,9 +67,10 @@ if ( $faculty ne '' ) {
             # If cardnumber failed, try userid
             $member = GetMember( 'userid' => $person->{'brukernavn'} );
         }
+        my $borrowernumber;
         if ( $member ) {
             # Update the borrower
-            my $borrowernumber = $member->{'borrowernumber'};
+            $borrowernumber = $member->{'borrowernumber'};
             my $success = ModMember( 
                 'borrowernumber' => $borrowernumber,
                 'cardnumber'   => $person->{'fsLopenr'},
@@ -90,7 +91,7 @@ if ( $faculty ne '' ) {
             }
         } else {
             # Add the borrower
-            my $borrowernumber = AddMember(
+            $borrowernumber = AddMember(
                 'cardnumber'   => $person->{'fsLopenr'},
                 'categorycode' => $faculty,
                 'branchcode'   => $branchcode,
@@ -160,8 +161,9 @@ if ( $students ne '' ) {
         # Dump all of $person if we are debugging
         say Dumper $person if $debug;
         # Figure out if the borrower already exists
+        my $borrowernumber;
         if ( my $member = GetMember( 'cardnumber' => $person->{'studentnr'} ) ) {
-            my $borrowernumber = $member->{'borrowernumber'};
+            $borrowernumber = $member->{'borrowernumber'};
             my $success = ModMember( 
                 'borrowernumber' => $borrowernumber,
                 'cardnumber'   => $person->{'studentnr'},
@@ -194,7 +196,7 @@ if ( $students ne '' ) {
             }
         } else {
             # Add the borrower
-            my $borrowernumber = AddMember(
+            $borrowernumber = AddMember(
                 'cardnumber'   => $person->{'studentnr'},
                 'categorycode' => $students,
                 'branchcode'   => $branchcode,
