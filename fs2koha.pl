@@ -56,9 +56,15 @@ my $student_new     = 0;
 my $student_updated = 0;
 my $student_failed  = 0;
 
+my %seen_fslopenr;
+
 if ( $faculty ne '' ) {
     foreach my $person ( @{ $xml->{'fagperson'} } ) {
         print 'F ' . $person->{'fornavn'} . ' ' . $person->{'etternavn'} if $verbose;
+
+        $seen_fslopenr{ $person->{'fsLopenr'} }++;
+        next if $seen_fslopenr{ $person->{'fsLopenr'} } > 1;
+
         $person = fix_email( $person );
         $person = fix_phone( $person );
         # Try to find patron based on cardnumber
@@ -121,6 +127,10 @@ if ( $faculty ne '' ) {
 if ( $students ne '' ) {
     foreach my $person ( @{ $xml->{'student'} } ) {
         print 'S ' . $person->{'fornavn'} . ' ' . $person->{'etternavn'} . ' ' . $person->{'studentnr'} if $verbose;
+
+        $seen_fslopenr{ $person->{'fsLopenr'} }++;
+        next if $seen_fslopenr{ $person->{'fsLopenr'} } > 1;
+
         # This just gets in the way of debugging
         $person->{'studieTilknytninger'} = undef;
         $person = fix_email( $person );
