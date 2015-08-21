@@ -136,7 +136,7 @@ if ( $students ne '' ) {
             foreach my $adr ( @{ $person->{'adresser'} } ) {
                 # The zip code is repeated here, so we need to remove the first 5 
                 # chars and store the rest
-                if ( $adr->{'sted'} ) {
+                if ( $adr->{'sted'} && length $adr->{'sted'} > 5 ) {
                     $adr->{'poststed'} = substr $adr->{'sted'}, 5;
                 }
                 # Now put the right address in the right slot
