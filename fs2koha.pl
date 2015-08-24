@@ -69,7 +69,7 @@ if ( $faculty ne '' ) {
         $person = fix_phone( $person );
         # Try to find patron based on cardnumber
         my $member = GetMember( 'cardnumber' => $person->{'fsLopenr'} );
-        unless ( $member ) {
+        if ( !$member && $person->{'brukernavn'} ) {
             # If cardnumber failed, try userid
             $member = GetMember( 'userid' => $person->{'brukernavn'} );
         }
