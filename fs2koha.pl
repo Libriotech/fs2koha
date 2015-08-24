@@ -28,6 +28,12 @@ use Getopt::Long;
 use Data::Dumper;
 use DateTime;
 use Time::Piece;
+use Email::Sender::Simple qw(sendmail);
+use Email::Simple;
+use Email::Sender::Transport::Sendmail qw();
+use Try::Tiny;
+use File::Slurper qw( read_text );
+use Digest::MD5 qw( md5_base64 );
 use Pod::Usage;
 use Modern::Perl;
  
@@ -35,15 +41,23 @@ my $dt = DateTime->now;
 my $date = $dt->ymd;
  
 # Get options
-my ( $input_file, $students, $faculty, $branchcode, $limit, $verbose, $debug ) = get_options();
+my ( $input_file, $students, $faculty, $branchcode, $password, $pwnotify, $limit, $verbose, $debug ) = get_options();
  
 # Check that the file exists
 if ( !-e $input_file ) {
-print "The file $input_file does not exist...\n";
-exit;
+    say "The file $input_file does not exist...";
+    exit;
+}
+if ( $password && !-e $password ) {
+    say "The file $password does not exist...";
+    exit;
+}
+if ( $pwnotify && !-e $pwnotify ) {
+    say "The file $pwnotify does not exist...";
+    exit;
 }
 
-# REad the whle file
+# Read the whole file
 my $xml = XMLin( $input_file );
 
 # Setup some counters
@@ -242,20 +256,54 @@ if ( $verbose ) {
 
 sub set_password_and_notify {
 
-    my ( $borrowernumber, $email ) = @_;
+    my ( $borrowernumber, $email, $password, $pwnotify ) = @_;
     my $member = GetMember( 'borrowernumber' => $borrowernumber );
     # Check password is not set
     if ( $member->{'password'} eq '!' ) {
-        say "setting password";
         # Generate password
-
+        my $salt = read_text( $password );
+        my $cardnumber = $member->{'cardnumber'};
+        my $string = $cardnumber . $salt;
+        my $pword = md5_base64( $string );
+        my $digest=Koha::AuthUtils::hash_password( $pword );
         # Set password
-
+        if ( changepassword( $member->{'userid'}, $borrowernumber, $digest ) ) {
+            print "password was set";
+        }
         # Send email
-    } else {
-        say "password already set";
+        send_email( $email, $member->{'userid'}, $pword, $pwnotify );
     }
-    # my $digest=Koha::AuthUtils::hash_password($input->param('newpassword'));
+}
+
+sub send_email {
+
+    my ( $to, $username, $password, $pwnotify ) = @_;
+    
+    my $from    = 'post@libriotech.no';
+    my $subject = 'Passord til bibliotekets katalog';
+    my $body    = read_text( $pwnotify );
+    
+    # Do substitutions on body text
+    $body =~ s/__USERNAME__/$username/g;
+    $body =~ s/__PASSWORD__/$password/g;
+    
+    my $email = Email::Simple->create(
+        header =>[
+            To      => $to,
+            From    => $from,
+            Subject => $subject
+        ],
+        body => $body,
+    );
+
+    try {
+        sendmail( $email, {
+            from      => $from,
+            transport => Email::Sender::Transport::Sendmail->new
+        });
+    } catch {
+        print "Can't send mail: $_";
+    }
 
 }
 
@@ -318,17 +366,37 @@ Name of input file.
 
 =item B<-s, --students>
  
-Which categorycode to put students in. Must exist in the Koha you are running 
-against. If this option is not given, students will not be processed. 
+Which categorycode to put students in. Must exist in the Koha you are running
+against. If this option is not given, students will not be processed.
 
 =item B<-f, --faculty>
  
-Which categorycode to put faculty in. Must exist in the Koha you are running 
-against. If this option is not given, faculty will not be processed. 
+Which categorycode to put faculty in. Must exist in the Koha you are running
+against. If this option is not given, faculty will not be processed.
 
 =item B<-b, --branchcode>
  
-Which branchcode to put popele in. Must exist in the Koha you are running against. 
+Which branchcode to put popele in. Must exist in the Koha you are running against.
+
+=item B<-p, --password>
+ 
+Create a new password for users that do not have one. The argument to this option 
+should be the path to a simple text file that just contains some random (but 
+never changing) string that will be combined with sundry other information to 
+form the basis of a predictably generated password.
+
+=item B<--pwnotify>
+ 
+Send an email when a new password has been set. The argument to this option should 
+be the path to a template file that will be sent out as email. Possible variables:
+
+=over 4
+
+=item * [% username %]
+
+=item * [% password %]
+
+=back
 
 =item B<-l, --limit>
  
@@ -357,6 +425,8 @@ my $input_file = '';
 my $students   = '';
 my $faculty    = '';
 my $branchcode = '';
+my $password   = '';
+my $pwnotify   = '';
 my $limit      = 0;
 my $verbose    = '';
 my $debug      = '';
@@ -365,8 +435,10 @@ my $help       = '';
 GetOptions (
     'i|infile=s'     => \$input_file,
     's|students=s'   => \$students,
-    'f|faculty=s'   => \$faculty,
+    'f|faculty=s'    => \$faculty,
     'b|branchcode=s' => \$branchcode,
+    'p|password=s'   => \$password,
+    'pwnotify=s'     => \$pwnotify,
     'l|limit=i'      => \$limit,
     'v|verbose'      => \$verbose,
     'd|debug'        => \$debug,
@@ -377,8 +449,9 @@ pod2usage( -exitval => 0 ) if $help;
 pod2usage( -msg => "\nMissing Argument: -i, --infile required\n",                    -exitval => 1 ) if !$input_file;
 pod2usage( -msg => "\nMissing Argument: -s, --students AND/OR -f, --faculty required\n", -exitval => 1 ) if !$students && !$faculty;
 pod2usage( -msg => "\nMissing Argument: -b, --branchcode required\n",                -exitval => 1 ) if !$branchcode;
+pod2usage( -msg => "\nMissing Argument: -p, --password required\n",                  -exitval => 1 ) if !$password && $pwnotify;
  
-return ( $input_file, $students, $faculty, $branchcode, $limit, $verbose, $debug );
+return ( $input_file, $students, $faculty, $branchcode, $password, $pwnotify, $limit, $verbose, $debug );
  
 }
  
