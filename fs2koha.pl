@@ -182,7 +182,7 @@ if ( $students ne '' ) {
             $person->{'expires'} = $person->{'studierettSlutt'};
         } else {
             my $expires = Time::Piece->strptime( $person->{'studierettSlutt'}, "%Y-%m-%d" );
-            $expires = $expires->add_years( 5 );
+            $expires = $expires->add_years( 1 );
             $person->{'expires'} = $expires->ymd;
         }
         # Dump all of $person if we are debugging
