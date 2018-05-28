@@ -20,8 +20,11 @@ sudo koha-shell -c "perl fs2koha.pl -i bas.xml -v -s STUDENT -f FACULTY -b MYLIB
 
 use Koha::Database;
 use Koha::AuthUtils;
+use Koha::Patrons;
+
 use C4::Members qw( GetMember AddMember ModMember );
 use C4::Members::Messaging;
+
 use XML::LibXML::Simple qw(XMLin);
 use Modern::Perl; 
 use Getopt::Long;
@@ -130,7 +133,7 @@ if ( $faculty ne '' ) {
             say " - Inserted as new ($borrowernumber)" if $verbose;
             $faculty_new++;
         }
-        set_password_and_notify( $borrowernumber, $person->{'epost_intern'} );
+        set_password_and_notify( $borrowernumber, $person->{'epost_intern'}, $password, $pwnotify );
         $faculty_count++;
         if ( $limit > 0 && $faculty_count == $limit ) {
             last;
@@ -250,7 +253,7 @@ if ( $students ne '' ) {
             say " - Inserted as new ($borrowernumber)" if $verbose;
             $student_new++;
         }
-        set_password_and_notify( $borrowernumber, $person->{'epost_intern'} );
+        set_password_and_notify( $borrowernumber, $person->{'epost_intern'}, $password, $pwnotify );
         $student_count++;
         if ( $limit > 0 && $student_count == $limit ) {
             last;
@@ -267,6 +270,9 @@ if ( $verbose ) {
 sub set_password_and_notify {
 
     my ( $borrowernumber, $email, $password, $pwnotify ) = @_;
+
+    return unless $password;
+
     my $member = GetMember( 'borrowernumber' => $borrowernumber );
     # Check password is not set
     if ( $member->{'password'} eq '!' ) {
@@ -275,10 +281,12 @@ sub set_password_and_notify {
         my $cardnumber = $member->{'cardnumber'};
         my $string = $cardnumber . $salt;
         my $pword = md5_base64( $string );
+        $pword = substr $pword, 0, 8;
         my $digest=Koha::AuthUtils::hash_password( $pword );
         # Set password
-        if ( changepassword( $member->{'userid'}, $borrowernumber, $digest ) ) {
-            print "password was set";
+        my $koha_member = Koha::Patrons->find({ 'borrowernumber' => $borrowernumber });
+        if ( $koha_member->update_password( $member->{'userid'}, $digest ) ) {
+            say "password was set";
         }
         # Send email
         send_email( $email, $member->{'userid'}, $pword, $pwnotify );
@@ -289,8 +297,10 @@ sub send_email {
 
     my ( $to, $username, $password, $pwnotify ) = @_;
     
-    my $from    = 'post@libriotech.no';
-    my $subject = 'Passord til bibliotekets katalog';
+    return unless $pwnotify;
+
+    my $from    = 'bibliotek@westerdals.no';
+    my $subject = 'Passord til bibibliotekets katalog. Password for library services.';
     my $body    = read_text( $pwnotify );
     
     # Do substitutions on body text
