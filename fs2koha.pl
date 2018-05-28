@@ -22,7 +22,7 @@ use Koha::Database;
 use Koha::AuthUtils;
 use Koha::Patrons;
 
-use C4::Members qw( GetMember AddMember ModMember );
+use C4::Members qw( AddMember ModMember );
 use C4::Members::Messaging;
 
 use XML::LibXML::Simple qw(XMLin);
@@ -189,7 +189,7 @@ if ( $students ne '' ) {
         say Dumper $person if $debug;
         # Figure out if the borrower already exists
         my $borrowernumber;
-        if ( my $member = GetMember( 'cardnumber' => $person->{'studentnr'} ) ) {
+        if ( my $member = Koha::Patrons->find({ 'cardnumber' => $person->{'studentnr'} }) ) {
             $borrowernumber = $member->{'borrowernumber'};
             my $success = ModMember( 
                 'borrowernumber' => $borrowernumber,
