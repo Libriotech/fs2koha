@@ -88,7 +88,7 @@ if ( $faculty ne '' ) {
         my $member = Koha::Patrons->find({ 'cardnumber' => $person->{'fsLopenr'} });
         if ( !$member && $person->{'brukernavn'} ) {
             # If cardnumber failed, try userid
-            $member = GetMember( 'userid' => $person->{'brukernavn'} );
+            $member = Koha::Patrons->find({ 'userid' => $person->{'brukernavn'} });
         }
         my $borrowernumber;
         if ( $member ) {
@@ -273,7 +273,7 @@ sub set_password_and_notify {
 
     return unless $password;
 
-    my $member = GetMember( 'borrowernumber' => $borrowernumber );
+    my $member = Koha::Patrons->find({ 'borrowernumber' => $borrowernumber });
     # Check password is not set
     if ( $member->{'password'} eq '!' ) {
         # Generate password
