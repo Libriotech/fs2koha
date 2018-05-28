@@ -85,7 +85,7 @@ if ( $faculty ne '' ) {
         $person = fix_email( $person );
         $person = fix_phone( $person );
         # Try to find patron based on cardnumber
-        my $member = GetMember( 'cardnumber' => $person->{'fsLopenr'} );
+        my $member = Koha::Patrons->find({ 'cardnumber' => $person->{'fsLopenr'} });
         if ( !$member && $person->{'brukernavn'} ) {
             # If cardnumber failed, try userid
             $member = GetMember( 'userid' => $person->{'brukernavn'} );
