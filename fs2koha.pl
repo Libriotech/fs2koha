@@ -93,7 +93,8 @@ if ( $faculty ne '' ) {
         my $borrowernumber;
         if ( $member ) {
             # Update the borrower
-            $borrowernumber = $member->{'borrowernumber'};
+            $borrowernumber = $member->borrowernumber;
+            say "borrowernumber = $borrowernumber";
             my $success = ModMember( 
                 'borrowernumber' => $borrowernumber,
                 'cardnumber'   => $person->{'fsLopenr'},
@@ -103,7 +104,7 @@ if ( $faculty ne '' ) {
                 'surname'      => $person->{'etternavn'},
                 'email'        => $person->{'epost_intern'},
                 'phone'        => $person->{'mobil'},
-                'userid'       => $member->{'userid'} ? $member->{'userid'} : $person->{'brukernavn'},
+                'userid'       => $member->userid ? $member->userid : $person->{'brukernavn'},
             );
             if ( $success ) {
                 say " - Updated ($borrowernumber)" if $verbose;
@@ -190,7 +191,7 @@ if ( $students ne '' ) {
         # Figure out if the borrower already exists
         my $borrowernumber;
         if ( my $member = Koha::Patrons->find({ 'cardnumber' => $person->{'studentnr'} }) ) {
-            $borrowernumber = $member->{'borrowernumber'};
+            $borrowernumber = $member->borrowernumber;
             my $success = ModMember( 
                 'borrowernumber' => $borrowernumber,
                 'cardnumber'   => $person->{'studentnr'},
@@ -275,21 +276,21 @@ sub set_password_and_notify {
 
     my $member = Koha::Patrons->find({ 'borrowernumber' => $borrowernumber });
     # Check password is not set
-    if ( $member->{'password'} eq '!' ) {
+    if ( $member->password eq '!' ) {
         # Generate password
         my $salt = read_text( $password );
-        my $cardnumber = $member->{'cardnumber'};
+        my $cardnumber = $member->cardnumber;
         my $string = $cardnumber . $salt;
         my $pword = md5_base64( $string );
         $pword = substr $pword, 0, 8;
         my $digest=Koha::AuthUtils::hash_password( $pword );
         # Set password
         my $koha_member = Koha::Patrons->find({ 'borrowernumber' => $borrowernumber });
-        if ( $koha_member->update_password( $member->{'userid'}, $digest ) ) {
+        if ( $koha_member->update_password( $member->userid, $digest ) ) {
             say "password was set";
         }
         # Send email
-        send_email( $email, $member->{'userid'}, $pword, $pwnotify );
+        send_email( $email, $member->userid, $pword, $pwnotify );
     }
 }
 
