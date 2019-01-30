@@ -22,7 +22,6 @@ use Koha::Database;
 use Koha::AuthUtils;
 use Koha::Patrons;
 
-use C4::Members qw( AddMember ModMember );
 use C4::Members::Messaging;
 
 use XML::LibXML::Simple qw(XMLin);
@@ -93,9 +92,8 @@ if ( $faculty ne '' ) {
         my $borrowernumber;
         if ( $member ) {
             # Update the borrower
-            $borrowernumber = $member->borrowernumber;
-            say "borrowernumber = $borrowernumber";
-            my $success = ModMember( 
+            $borrowernumber = $member->{'borrowernumber'};
+            my %borrower = (
                 'borrowernumber' => $borrowernumber,
                 'cardnumber'   => $person->{'fsLopenr'},
                 'categorycode' => $faculty,
@@ -106,16 +104,17 @@ if ( $faculty ne '' ) {
                 'phone'        => $person->{'mobil'},
                 'userid'       => $member->userid ? $member->userid : $person->{'brukernavn'},
             );
-            if ( $success ) {
-                say " - Updated ($borrowernumber)" if $verbose;
-                $faculty_updated++;
-            } else {
+            eval { $member->set(\%borrower)->store };
+            if ( $@ ) {
                 say " - FAILED to update ($borrowernumber)" if $verbose;
                 $faculty_failed++;
+            } else {
+                say " - Updated ($borrowernumber)" if $verbose;
+                $faculty_updated++;
             }
         } else {
             # Add the borrower
-            $borrowernumber = AddMember(
+            my %borrower = (
                 'cardnumber'   => $person->{'fsLopenr'},
                 'categorycode' => $faculty,
                 'branchcode'   => $branchcode,
@@ -126,6 +125,8 @@ if ( $faculty ne '' ) {
                 'phone'        => $person->{'mobil'},
                 'userid'       => $person->{'brukernavn'},
             );
+            my $patron = Koha::Patron->new(\%borrower)->store;
+            $borrowernumber = $patron->borrowernumber;
             # Set default messaging preferences
             C4::Members::Messaging::SetMessagingPreferencesFromDefaults({
                 'borrowernumber' => $borrowernumber,
@@ -191,8 +192,8 @@ if ( $students ne '' ) {
         # Figure out if the borrower already exists
         my $borrowernumber;
         if ( my $member = Koha::Patrons->find({ 'cardnumber' => $person->{'studentnr'} }) ) {
-            $borrowernumber = $member->borrowernumber;
-            my $success = ModMember( 
+            $borrowernumber = $member->{'borrowernumber'};
+            my %borrower = (
                 'borrowernumber' => $borrowernumber,
                 'cardnumber'   => $person->{'studentnr'},
                 'categorycode' => $students,
@@ -215,16 +216,17 @@ if ( $students ne '' ) {
                 'B_zipcode'      => $person->{'adresse_hjem'}->{'postnr'}   || '',
                 'B_city'         => $person->{'adresse_hjem'}->{'poststed'} || '',
             );
-            if ( $success ) {
-                say " - Updated ($borrowernumber)" if $verbose;
-                $student_updated++;
-            } else {
+            eval { $member->set(\%borrower)->store };
+            if ( $@ ) {
                 say " - FAILED to update ($borrowernumber)" if $verbose;
                 $student_failed++;
+            } else {
+                say " - Updated ($borrowernumber)" if $verbose;
+                $student_updated++;
             }
         } else {
             # Add the borrower
-            $borrowernumber = AddMember(
+            my %borrower = (
                 'cardnumber'   => $person->{'studentnr'},
                 'categorycode' => $students,
                 'branchcode'   => $branchcode,
@@ -246,6 +248,8 @@ if ( $students ne '' ) {
                 'B_zipcode'      => $person->{'adresse_hjem'}->{'postnr'}   || '',
                 'B_city'         => $person->{'adresse_hjem'}->{'poststed'} || '',
             );
+            my $patron = Koha::Patron->new(\%borrower)->store;
+            $borrowernumber = $patron->borrowernumber;
             # Set default messaging preferences
             C4::Members::Messaging::SetMessagingPreferencesFromDefaults({
                 'borrowernumber' => $borrowernumber,
